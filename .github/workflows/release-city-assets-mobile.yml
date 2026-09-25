@@ -1,0 +1,67 @@
+name: Build City Smash 3D Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      quality:
+        description: GLB quality preset
+        type: choice
+        required: true
+        default: mobile
+        options:
+          - mobile
+          - detailed
+
+permissions:
+  contents: write
+
+jobs:
+  create-assets-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Generate 16 procedural GLB models
+        env:
+          ASSET_QUALITY: ${{ inputs.quality }}
+        run: |
+          set -euo pipefail
+          python3 generate_city_assets_mobile.py \
+            --output build/city_assets \
+            --quality "$ASSET_QUALITY"
+
+      - name: Validate models and package ZIP
+        run: |
+          set -euo pipefail
+          python3 generate_city_assets_mobile.py --verify build/city_assets
+          mkdir -p release
+          (
+            cd build
+            zip -q -r ../release/City_Smash_3D_Assets.zip city_assets
+          )
+          (
+            cd release
+            sha256sum City_Smash_3D_Assets.zip > City_Smash_3D_Assets.zip.sha256
+            unzip -tq City_Smash_3D_Assets.zip
+          )
+
+      - name: Publish ZIP as a GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET_QUALITY: ${{ inputs.quality }}
+        run: |
+          set -euo pipefail
+          TAG="city-assets-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$TAG" \
+            release/City_Smash_3D_Assets.zip \
+            release/City_Smash_3D_Assets.zip.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --latest=false \
+            --title "City Smash 3D Assets ($ASSET_QUALITY)" \
+            --notes "16 low-poly GLB models and manifest.json. Y-up coordinates; no textures or external downloads. Download the ZIP asset below."
+          RELEASE_URL="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url --jq '.url')"
+          printf '### City Smash 3D asset release\n\n[%s](%s)\n' "$TAG" "$RELEASE_URL" >> "$GITHUB_STEP_SUMMARY"
